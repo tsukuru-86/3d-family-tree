@@ -1,23 +1,868 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Family Tree</title>
-    <style>
-        body { 
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-        #graph-3d {
-            width: 100vw;
-            height: 100vh;
-        }
-    </style>
-<script defer src="bundle.js"></script></head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 家系図 Premium</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Noto Sans JP', 'Hiragino Sans', sans-serif;
+      background: #0a0e1a;
+      overflow: hidden;
+      color: #e0e8ff;
+    }
+
+    #canvas { display: block; width: 100vw; height: 100vh; }
+
+    /* ---- Loading Screen ---- */
+    #loading {
+      position: fixed; inset: 0;
+      background: linear-gradient(135deg, #0a0e1a 0%, #0d1b3e 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 999;
+      transition: opacity 0.8s ease;
+    }
+    #loading h1 { font-size: 28px; font-weight: 700; color: #a0c4ff; margin-bottom: 8px; letter-spacing: 4px; }
+    #loading p { font-size: 14px; color: #5577aa; margin-bottom: 32px; letter-spacing: 2px; }
+    .loader-ring {
+      width: 56px; height: 56px;
+      border: 3px solid rgba(100,160,255,0.15);
+      border-top-color: #64a0ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Title ---- */
+    #title {
+      position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+      font-size: 18px; font-weight: 700; letter-spacing: 6px;
+      color: rgba(160,196,255,0.85);
+      text-shadow: 0 0 20px rgba(100,160,255,0.5);
+      pointer-events: none; user-select: none;
+    }
+
+    /* ---- Info Panel ---- */
+    #info-panel {
+      position: fixed; top: 50%; right: 24px;
+      transform: translateY(-50%) translateX(360px);
+      width: 320px;
+      background: rgba(10, 18, 40, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(100,160,255,0.2);
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(100,160,255,0.05);
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      max-height: 85vh; overflow-y: auto;
+    }
+    #info-panel.open {
+      transform: translateY(-50%) translateX(0);
+    }
+    #info-panel::-webkit-scrollbar { width: 4px; }
+    #info-panel::-webkit-scrollbar-track { background: transparent; }
+    #info-panel::-webkit-scrollbar-thumb { background: rgba(100,160,255,0.3); border-radius: 2px; }
+
+    .panel-gen-badge {
+      display: inline-block;
+      font-size: 11px; font-weight: 600; letter-spacing: 2px;
+      padding: 4px 12px; border-radius: 20px;
+      margin-bottom: 12px;
+      border: 1px solid currentColor;
+      opacity: 0.8;
+    }
+    .panel-name {
+      font-size: 28px; font-weight: 700; color: #ffffff;
+      margin-bottom: 4px;
+      text-shadow: 0 0 20px currentColor;
+    }
+    .panel-born {
+      font-size: 13px; color: #6688aa; margin-bottom: 6px;
+    }
+    .panel-role {
+      font-size: 14px; color: #88aacc; margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .panel-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(100,160,255,0.3), transparent);
+      margin: 16px 0;
+    }
+    .panel-section-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 3px;
+      color: #445577; text-transform: uppercase; margin-bottom: 8px;
+    }
+    .panel-rel-list { list-style: none; }
+    .panel-rel-list li {
+      font-size: 14px; color: #aabbd4; padding: 3px 0;
+    }
+    .panel-rel-list li::before { content: '◆ '; font-size: 8px; color: #445577; vertical-align: middle; }
+    .panel-bio {
+      font-size: 13px; color: #7799bb; line-height: 1.8;
+      margin-top: 8px;
+    }
+    #close-btn {
+      position: absolute; top: 12px; right: 12px;
+      background: none; border: none; cursor: pointer;
+      color: #445577; font-size: 20px; line-height: 1;
+      padding: 4px 8px; border-radius: 4px;
+      transition: color 0.2s, background 0.2s;
+    }
+    #close-btn:hover { color: #ff6677; background: rgba(255,100,120,0.1); }
+
+    /* ---- Legend ---- */
+    #legend {
+      position: fixed; bottom: 24px; right: 24px;
+      background: rgba(10, 18, 40, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(100,160,255,0.15);
+      border-radius: 12px;
+      padding: 16px 20px;
+      font-size: 13px;
+    }
+    #legend h4 {
+      font-size: 11px; letter-spacing: 3px; color: #445577;
+      text-transform: uppercase; margin-bottom: 12px;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 8px; color: #8899bb;
+    }
+    .legend-dot {
+      width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+      box-shadow: 0 0 8px currentColor;
+    }
+    .legend-line {
+      width: 24px; height: 3px; border-radius: 2px; flex-shrink: 0;
+    }
+
+    /* ---- Controls Help ---- */
+    #controls {
+      position: fixed; bottom: 24px; left: 24px;
+      background: rgba(10, 18, 40, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(100,160,255,0.15);
+      border-radius: 12px;
+      padding: 16px 20px;
+      font-size: 12px; color: #445577;
+      line-height: 2;
+    }
+    #controls h4 {
+      font-size: 11px; letter-spacing: 3px; color: #445577;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    #controls span { color: #6677aa; }
+
+    /* ---- Reset Button ---- */
+    #reset-btn {
+      position: fixed; top: 24px; left: 24px;
+      background: rgba(10,18,40,0.8);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(100,160,255,0.2);
+      border-radius: 10px;
+      padding: 10px 18px;
+      color: #7799cc; font-size: 13px; font-weight: 600;
+      cursor: pointer; letter-spacing: 1px;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    #reset-btn:hover {
+      background: rgba(100,160,255,0.1);
+      color: #a0c4ff;
+      box-shadow: 0 0 12px rgba(100,160,255,0.2);
+    }
+
+    /* ---- Tooltip ---- */
+    #tooltip {
+      position: fixed;
+      background: rgba(10,18,40,0.95);
+      border: 1px solid rgba(100,160,255,0.3);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 14px; font-weight: 600; color: #c0d8ff;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      z-index: 100;
+    }
+  </style>
+</head>
 <body>
-    <div id="graph-3d"></div>
-     <!-- スクリプトはWebpackによって自動的に挿入されます -->
+
+<canvas id="canvas"></canvas>
+
+<div id="loading">
+  <h1>家系図</h1>
+  <p>FAMILY TREE 3D</p>
+  <div class="loader-ring"></div>
+</div>
+
+<div id="title">3D 家系図 — PREMIUM</div>
+
+<div id="info-panel">
+  <button id="close-btn">×</button>
+  <div class="panel-gen-badge" id="panel-gen-badge">第0世代</div>
+  <div class="panel-name" id="panel-name">—</div>
+  <div class="panel-born" id="panel-born"></div>
+  <div class="panel-role" id="panel-role"></div>
+  <div class="panel-divider"></div>
+  <div id="panel-rels"></div>
+  <div class="panel-divider"></div>
+  <div class="panel-section-title">プロフィール</div>
+  <div class="panel-bio" id="panel-bio"></div>
+</div>
+
+<div id="legend">
+  <h4>凡例</h4>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#FFD700; color:#FFD700;"></div>
+    <span>祖父母世代</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#FF6B9D; color:#FF6B9D;"></div>
+    <span>父母世代</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#00D4FF; color:#00D4FF;"></div>
+    <span>自分世代</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:#FFA500;"></div>
+    <span>夫婦関係</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:#00FF88;"></div>
+    <span>親子関係</span>
+  </div>
+</div>
+
+<div id="controls">
+  <h4>操作方法</h4>
+  <div><span>ドラッグ</span> → 回転</div>
+  <div><span>スクロール</span> → ズーム</div>
+  <div><span>右ドラッグ</span> → 移動</div>
+  <div><span>クリック</span> → 詳細表示</div>
+  <div><span>R キー</span> → ビューリセット</div>
+</div>
+
+<button id="reset-btn">⌂ リセット</button>
+
+<div id="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+window.addEventListener('load', function () {
+  if (typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+    document.getElementById('loading').innerHTML =
+      '<h1 style="color:#ff4455">ライブラリ読み込みエラー</h1><p>ページを再読み込みしてください。</p>';
+    return;
+  }
+  initFamilyTree();
+});
+
+// ==================== DATA ====================
+const GEN_COLORS_HEX = ['#FFD700', '#FF6B9D', '#00D4FF'];
+const GEN_COLORS_INT = [0xFFD700, 0xFF6B9D, 0x00D4FF];
+const GEN_LABELS    = ['祖父母世代', '父母世代', '自分世代'];
+const SPOUSE_COLOR  = 0xFFA500;
+const PC_COLOR      = 0x00FF88;   // parent-child
+
+const people = [
+  {
+    id: 1, name: '祖父', gen: 0, born: 1920, role: '元軍人・地域活動家',
+    bio: '1920年生まれ。厳格な性格の元軍人。退役後は地域活動に尽力し、多くの人から尊敬を集めた。',
+    pos: { x: -30, y: 150, z: 0 }
+  },
+  {
+    id: 2, name: '祖母', gen: 0, born: 1925, role: '主婦・和菓子職人',
+    bio: '1925年生まれ。温かく家族想いの人。伝統和菓子作りに優れ、地域の文化祭では毎年腕を振るっていた。',
+    pos: { x: 50, y: 150, z: 0 }
+  },
+  {
+    id: 3, name: '父', gen: 1, born: 1950, role: '会社経営者',
+    bio: '1950年生まれ。自らの会社を一から立ち上げ成功させた起業家。仕事熱心だが家族サービスも忘れない。趣味は釣りと庭いじり。',
+    pos: { x: 0, y: 0, z: 0 }
+  },
+  {
+    id: 4, name: '叔父', gen: 1, born: 1945, role: '医師・研究者',
+    bio: '1945年生まれ。地域医療に貢献してきた医師。研究論文も多数発表。休日には山登りを楽しむ。',
+    pos: { x: 90, y: 0, z: 0 }
+  },
+  {
+    id: 5, name: '母', gen: 1, born: 1952, role: '元教師・画家',
+    bio: '1952年生まれ。長年教壇に立ち、生徒からの信頼も厚かった元教師。退職後は絵画に傾倒し、自宅の壁には自作品が並ぶ。',
+    pos: { x: -80, y: 0, z: 0 }
+  },
+  {
+    id: 6, name: '自分', gen: 2, born: 1985, role: 'ITエンジニア',
+    bio: '1985年生まれ。IT企業でエンジニアとして活躍。新技術を学ぶことが好きで、休日はプログラミングや電子工作を楽しむ。',
+    pos: { x: 30, y: -150, z: 0 }
+  },
+  {
+    id: 7, name: '兄', gen: 2, born: 1980, role: 'グローバル企業マネージャー',
+    bio: '1980年生まれ。海外拠点で活躍するグローバル企業のマネージャー。3カ国語を話し、世界各地を飛び回っている。',
+    pos: { x: -30, y: -150, z: 0 }
+  },
+  {
+    id: 8, name: '姉', gen: 2, born: 1982, role: 'ファッションデザイナー',
+    bio: '1982年生まれ。有名ブランドのデザインを手がけるデザイナー。その才能は業界でも高く評価されている二児の母。',
+    pos: { x: -85, y: -150, z: 0 }
+  },
+  {
+    id: 9, name: 'いとこ1', gen: 2, born: 1975, role: '公務員',
+    bio: '1975年生まれ。真面目で責任感が強い公務員。市役所で管理職を務め、地域ボランティアにも積極的に参加している。',
+    pos: { x: 75, y: -150, z: 0 }
+  },
+  {
+    id: 10, name: 'いとこ2', gen: 2, born: 1978, role: '小学校教師',
+    bio: '1978年生まれ。子どもたちに大人気の小学校教師。創造的な授業が評判で教育関係の賞も受賞している。',
+    pos: { x: 120, y: -150, z: 0 }
+  }
+];
+
+const relationships = [
+  { type: 'spouse', a: 1, b: 2 },
+  { type: 'spouse', a: 3, b: 5 },
+  { type: 'parent-child', parent: 1, child: 3 },
+  { type: 'parent-child', parent: 2, child: 3 },
+  { type: 'parent-child', parent: 1, child: 4 },
+  { type: 'parent-child', parent: 2, child: 4 },
+  { type: 'parent-child', parent: 3, child: 6 },
+  { type: 'parent-child', parent: 5, child: 6 },
+  { type: 'parent-child', parent: 3, child: 7 },
+  { type: 'parent-child', parent: 5, child: 7 },
+  { type: 'parent-child', parent: 3, child: 8 },
+  { type: 'parent-child', parent: 5, child: 8 },
+  { type: 'parent-child', parent: 4, child: 9 },
+  { type: 'parent-child', parent: 4, child: 10 }
+];
+
+// ==================== HELPERS ====================
+function getPersonById(id) { return people.find(p => p.id === id); }
+
+function getRelInfo(personId) {
+  const spouseRel = relationships.find(r => r.type === 'spouse' && (r.a === personId || r.b === personId));
+  const spouseId  = spouseRel ? (spouseRel.a === personId ? spouseRel.b : spouseRel.a) : null;
+  const parentRels   = relationships.filter(r => r.type === 'parent-child' && r.child === personId);
+  const childRels    = relationships.filter(r => r.type === 'parent-child' && r.parent === personId);
+  return {
+    spouse:   spouseId  ? getPersonById(spouseId)    : null,
+    parents:  parentRels.map(r => getPersonById(r.parent)).filter(Boolean),
+    children: childRels.map(r => getPersonById(r.child)).filter(Boolean)
+  };
+}
+
+function getDirectRelativeIds(personId) {
+  const { spouse, parents, children } = getRelInfo(personId);
+  const ids = new Set();
+  if (spouse)   ids.add(spouse.id);
+  parents.forEach(p => ids.add(p.id));
+  children.forEach(c => ids.add(c.id));
+  return ids;
+}
+
+// Deduplicate parent-child edges: if multiple parents share a child, use their midpoint
+function buildParentChildEdges() {
+  const childParentsMap = {};
+  relationships.filter(r => r.type === 'parent-child').forEach(r => {
+    if (!childParentsMap[r.child]) childParentsMap[r.child] = [];
+    if (!childParentsMap[r.child].includes(r.parent)) childParentsMap[r.child].push(r.parent);
+  });
+  const edges = [];
+  Object.entries(childParentsMap).forEach(([childId, parentIds]) => {
+    let sx = 0, sy = 0, sz = 0;
+    parentIds.forEach(pid => {
+      const p = getPersonById(parseInt(pid));
+      sx += p.pos.x; sy += p.pos.y; sz += p.pos.z;
+    });
+    sx /= parentIds.length; sy /= parentIds.length; sz /= parentIds.length;
+    edges.push({ startPos: { x: sx, y: sy, z: sz }, childId: parseInt(childId) });
+  });
+  return edges;
+}
+
+// ==================== MAIN ====================
+function initFamilyTree() {
+  const canvas = document.getElementById('canvas');
+
+  // Scene
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x060a14);
+  scene.fog = new THREE.Fog(0x060a14, 600, 1200);
+
+  // Camera
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 1600);
+  camera.position.set(0, 60, 380);
+  camera.lookAt(0, 0, 0);
+
+  // Renderer
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // Controls
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 60;
+  controls.maxDistance = 700;
+  controls.target.set(0, 0, 0);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0x203060, 0.9));
+  const key = new THREE.DirectionalLight(0xaaddff, 1.0);
+  key.position.set(2, 3, 4); scene.add(key);
+  const fill = new THREE.DirectionalLight(0x4466aa, 0.5);
+  fill.position.set(-3, -1, -2); scene.add(fill);
+  const rim = new THREE.DirectionalLight(0x224488, 0.4);
+  rim.position.set(0, -4, -3); scene.add(rim);
+
+  // ---------- STAR FIELD ----------
+  const STAR_COUNT = 3000;
+  const starPositions = new Float32Array(STAR_COUNT * 3);
+  const starSizes = new Float32Array(STAR_COUNT);
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const r = 600 + Math.random() * 800;
+    const theta = Math.random() * Math.PI * 2;
+    const phi   = Math.acos(2 * Math.random() - 1);
+    starPositions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+    starPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    starPositions[i * 3 + 2] = r * Math.cos(phi);
+    starSizes[i] = 0.3 + Math.random() * 1.2;
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+  const starMat = new THREE.PointsMaterial({
+    color: 0xffffff, size: 0.8, sizeAttenuation: true,
+    transparent: true, opacity: 0.7,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  });
+  const starField = new THREE.Points(starGeo, starMat);
+  scene.add(starField);
+
+  // ---------- GENERATION PLANES ----------
+  [150, 0, -150].forEach((y, gi) => {
+    const planeGeo = new THREE.PlaneGeometry(500, 280);
+    const planeMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(GEN_COLORS_INT[gi]),
+      transparent: true, opacity: 0.025,
+      side: THREE.DoubleSide, depthWrite: false
+    });
+    const plane = new THREE.Mesh(planeGeo, planeMat);
+    plane.rotation.x = Math.PI / 2;
+    plane.position.set(0, y, 0);
+    scene.add(plane);
+
+    // Generation label sprite
+    const labelSprite = makeGenLabel(GEN_LABELS[gi], GEN_COLORS_HEX[gi]);
+    labelSprite.position.set(-220, y + 4, 0);
+    labelSprite.scale.set(80, 14, 1);
+    scene.add(labelSprite);
+  });
+
+  // ---------- NODE OBJECTS ----------
+  const nodeGroups = {};   // id -> THREE.Group
+  const nodeMetas  = {};   // id -> { core, glow, origEmissive, origGlowOpacity }
+
+  people.forEach(person => {
+    const colorInt = GEN_COLORS_INT[person.gen];
+    const color = new THREE.Color(colorInt);
+
+    const group = new THREE.Group();
+    group.position.set(person.pos.x, person.pos.y, person.pos.z);
+    group.userData.personId = person.id;
+
+    // Core sphere
+    const coreGeo = new THREE.SphereGeometry(9, 32, 32);
+    const coreMat = new THREE.MeshPhongMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 0.45,
+      shininess: 120,
+      specular: new THREE.Color(0xffffff)
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    group.add(core);
+
+    // Outer glow sphere
+    const glowGeo = new THREE.SphereGeometry(16, 24, 24);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.13,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    group.add(glow);
+
+    // Name label
+    const labelSprite = makeNodeLabel(person.name, GEN_COLORS_HEX[person.gen]);
+    labelSprite.position.set(0, 22, 0);
+    group.add(labelSprite);
+
+    scene.add(group);
+    nodeGroups[person.id] = group;
+    nodeMetas[person.id]  = { core, glow, label: labelSprite };
+  });
+
+  // ---------- EDGES ----------
+  const allEdgeLines = [];
+
+  // Spouse edges
+  relationships.filter(r => r.type === 'spouse').forEach(rel => {
+    const pA = getPersonById(rel.a);
+    const pB = getPersonById(rel.b);
+    const vA = new THREE.Vector3(pA.pos.x, pA.pos.y, pA.pos.z);
+    const vB = new THREE.Vector3(pB.pos.x, pB.pos.y, pB.pos.z);
+
+    const geo = new THREE.BufferGeometry().setFromPoints([vA, vB]);
+    const mat = new THREE.LineBasicMaterial({
+      color: SPOUSE_COLOR, transparent: true, opacity: 0.55,
+      blending: THREE.AdditiveBlending
+    });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    allEdgeLines.push({ line, mat });
+  });
+
+  // Parent-child edges (deduplicated)
+  const pcEdgeDefs = buildParentChildEdges();
+  const pcCurves = [];
+  pcEdgeDefs.forEach(edgeDef => {
+    const child = getPersonById(edgeDef.childId);
+    const vStart = new THREE.Vector3(edgeDef.startPos.x, edgeDef.startPos.y, edgeDef.startPos.z);
+    const vEnd   = new THREE.Vector3(child.pos.x, child.pos.y, child.pos.z);
+    const vMid   = new THREE.Vector3(
+      (vStart.x + vEnd.x) / 2,
+      (vStart.y + vEnd.y) / 2,
+      (vStart.z + vEnd.z) / 2 + 30
+    );
+
+    const curve = new THREE.QuadraticBezierCurve3(vStart, vMid, vEnd);
+    const pts = curve.getPoints(40);
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({
+      color: PC_COLOR, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending
+    });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    allEdgeLines.push({ line, mat });
+    pcCurves.push(curve);
+  });
+
+  // ---------- PARTICLES ----------
+  const particles = [];
+
+  // Spouse particles
+  relationships.filter(r => r.type === 'spouse').forEach(rel => {
+    const pA = getPersonById(rel.a);
+    const pB = getPersonById(rel.b);
+    const vA = new THREE.Vector3(pA.pos.x, pA.pos.y, pA.pos.z);
+    const vB = new THREE.Vector3(pB.pos.x, pB.pos.y, pB.pos.z);
+
+    for (let i = 0; i < 3; i++) {
+      const pg = new THREE.SphereGeometry(1.8, 8, 8);
+      const pm = new THREE.MeshBasicMaterial({
+        color: SPOUSE_COLOR, blending: THREE.AdditiveBlending, depthWrite: false
+      });
+      const mesh = new THREE.Mesh(pg, pm);
+      scene.add(mesh);
+      particles.push({ mesh, type: 'linear', vA, vB, t: i / 3, speed: 0.0035 });
+    }
+  });
+
+  // Parent-child particles
+  pcCurves.forEach(curve => {
+    for (let i = 0; i < 3; i++) {
+      const pg = new THREE.SphereGeometry(1.8, 8, 8);
+      const pm = new THREE.MeshBasicMaterial({
+        color: PC_COLOR, blending: THREE.AdditiveBlending, depthWrite: false
+      });
+      const mesh = new THREE.Mesh(pg, pm);
+      scene.add(mesh);
+      particles.push({ mesh, type: 'curve', curve, t: i / 3, speed: 0.003 + Math.random() * 0.002 });
+    }
+  });
+
+  // ---------- INTERACTION ----------
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 5;
+  const mouse = new THREE.Vector2();
+  let selectedId = null;
+  let hoveredId  = null;
+
+  const tooltip = document.getElementById('tooltip');
+
+  function getClickableObjects() {
+    return Object.values(nodeGroups).map(g => g.children[0]); // cores only
+  }
+
+  function resetAllNodes() {
+    people.forEach(p => {
+      const meta = nodeMetas[p.id];
+      const color = new THREE.Color(GEN_COLORS_INT[p.gen]);
+      meta.core.material.emissiveIntensity = 0.45;
+      meta.core.material.color.set(color);
+      meta.core.material.emissive.set(color);
+      meta.glow.material.opacity = 0.13;
+      nodeGroups[p.id].scale.set(1, 1, 1);
+    });
+  }
+
+  function applyHighlight(selectedPersonId) {
+    const relIds = getDirectRelativeIds(selectedPersonId);
+    people.forEach(p => {
+      const meta = nodeMetas[p.id];
+      const group = nodeGroups[p.id];
+      if (p.id === selectedPersonId) {
+        // Selected: bright white glow
+        meta.core.material.emissive.set(0xffffff);
+        meta.core.material.emissiveIntensity = 0.8;
+        meta.glow.material.opacity = 0.35;
+        group.scale.set(1.15, 1.15, 1.15);
+      } else if (relIds.has(p.id)) {
+        // Related: slightly bright
+        const color = new THREE.Color(GEN_COLORS_INT[p.gen]);
+        meta.core.material.emissive.set(color);
+        meta.core.material.emissiveIntensity = 0.6;
+        meta.glow.material.opacity = 0.2;
+        group.scale.set(1, 1, 1);
+      } else {
+        // Unrelated: dim
+        meta.core.material.emissive.set(0x000000);
+        meta.core.material.emissiveIntensity = 0.05;
+        meta.glow.material.opacity = 0.04;
+        group.scale.set(1, 1, 1);
+      }
+    });
+  }
+
+  function showInfoPanel(personId) {
+    const person = getPersonById(personId);
+    const { spouse, parents, children } = getRelInfo(personId);
+    const panel = document.getElementById('info-panel');
+    const badge = document.getElementById('panel-gen-badge');
+    const colorHex = GEN_COLORS_HEX[person.gen];
+
+    badge.textContent = GEN_LABELS[person.gen];
+    badge.style.color = colorHex;
+    badge.style.borderColor = colorHex;
+
+    document.getElementById('panel-name').textContent  = person.name;
+    document.getElementById('panel-name').style.color  = colorHex;
+    document.getElementById('panel-born').textContent  = `${person.born}年生まれ`;
+    document.getElementById('panel-role').textContent  = person.role;
+    document.getElementById('panel-bio').textContent   = person.bio;
+
+    let relsHtml = '';
+    if (parents.length > 0) {
+      relsHtml += `<div class="panel-section-title">親</div>
+        <ul class="panel-rel-list">${parents.map(p => `<li>${p.name}</li>`).join('')}</ul>`;
+    }
+    if (spouse) {
+      relsHtml += `<div class="panel-section-title" style="margin-top:10px">配偶者</div>
+        <ul class="panel-rel-list"><li>${spouse.name}</li></ul>`;
+    }
+    if (children.length > 0) {
+      relsHtml += `<div class="panel-section-title" style="margin-top:10px">子</div>
+        <ul class="panel-rel-list">${children.map(c => `<li>${c.name}</li>`).join('')}</ul>`;
+    }
+    document.getElementById('panel-rels').innerHTML = relsHtml;
+
+    panel.classList.add('open');
+  }
+
+  function hideInfoPanel() {
+    document.getElementById('info-panel').classList.remove('open');
+  }
+
+  canvas.addEventListener('mousemove', e => {
+    mouse.x = (e.clientX / window.innerWidth)  * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(getClickableObjects());
+    if (hits.length > 0) {
+      const hit = hits[0].object;
+      const pid = hit.parent.userData.personId;
+      if (pid !== hoveredId) {
+        hoveredId = pid;
+        canvas.style.cursor = 'pointer';
+      }
+      const person = getPersonById(pid);
+      tooltip.textContent = person.name;
+      tooltip.style.left = e.clientX + 'px';
+      tooltip.style.top  = (e.clientY - 40) + 'px';
+      tooltip.style.opacity = '1';
+    } else {
+      if (hoveredId !== null) {
+        hoveredId = null;
+        canvas.style.cursor = 'default';
+      }
+      tooltip.style.opacity = '0';
+    }
+  });
+
+  canvas.addEventListener('click', e => {
+    mouse.x = (e.clientX / window.innerWidth)  * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(getClickableObjects());
+    if (hits.length > 0) {
+      const pid = hits[0].object.parent.userData.personId;
+      selectedId = pid;
+      applyHighlight(pid);
+      showInfoPanel(pid);
+    } else {
+      selectedId = null;
+      resetAllNodes();
+      hideInfoPanel();
+    }
+  });
+
+  document.getElementById('close-btn').addEventListener('click', () => {
+    selectedId = null;
+    resetAllNodes();
+    hideInfoPanel();
+  });
+
+  function resetCamera() {
+    camera.position.set(0, 60, 380);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+  document.getElementById('reset-btn').addEventListener('click', resetCamera);
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'r' || e.key === 'R') resetCamera();
+    if (e.key === 'Escape') {
+      selectedId = null;
+      resetAllNodes();
+      hideInfoPanel();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- ANIMATION LOOP ----------
+  let clock = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    clock += 0.01;
+
+    // Star field slow drift
+    starField.rotation.y += 0.00006;
+    starField.rotation.x += 0.000025;
+
+    // Particles
+    particles.forEach(ps => {
+      ps.t = (ps.t + ps.speed) % 1.0;
+      if (ps.type === 'curve') {
+        ps.mesh.position.copy(ps.curve.getPoint(ps.t));
+      } else {
+        ps.mesh.position.lerpVectors(ps.vA, ps.vB, ps.t);
+      }
+    });
+
+    // Pulse glow on selected node
+    if (selectedId !== null) {
+      const meta = nodeMetas[selectedId];
+      if (meta) {
+        meta.glow.material.opacity = 0.28 + Math.sin(clock * 3) * 0.09;
+      }
+    }
+
+    // Gentle idle bob on all nodes
+    people.forEach(person => {
+      const group = nodeGroups[person.id];
+      const baseY = person.pos.y;
+      const phase = person.id * 0.9;
+      group.position.y = baseY + Math.sin(clock * 0.7 + phase) * 1.2;
+    });
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Hide loading screen
+  setTimeout(() => {
+    const loading = document.getElementById('loading');
+    loading.style.opacity = '0';
+    setTimeout(() => { loading.style.display = 'none'; }, 800);
+  }, 700);
+}
+
+// ==================== SPRITE HELPERS ====================
+function makeNodeLabel(name, colorHex) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const fontSize = 32;
+  ctx.font = `600 ${fontSize}px 'Noto Sans JP', Arial, sans-serif`;
+  const tw = ctx.measureText(name).width;
+  canvas.width  = Math.ceil(tw) + 28;
+  canvas.height = fontSize + 18;
+  ctx.font = `600 ${fontSize}px 'Noto Sans JP', Arial, sans-serif`;
+
+  // Background
+  const r = 7, w = canvas.width, h = canvas.height;
+  ctx.beginPath();
+  ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r);
+  ctx.lineTo(w, h - r); ctx.quadraticCurveTo(w, h, w - r, h);
+  ctx.lineTo(r, h); ctx.quadraticCurveTo(0, h, 0, h - r);
+  ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(6,10,20,0.88)';
+  ctx.fill();
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(name, w / 2, h / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(canvas.width / 5.5, canvas.height / 5.5, 1);
+  return sprite;
+}
+
+function makeGenLabel(text, colorHex) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 512; canvas.height = 48;
+  ctx.font = '700 28px "Noto Sans JP", Arial, sans-serif';
+  ctx.fillStyle = colorHex;
+  ctx.globalAlpha = 0.45;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('── ' + text, 10, 24);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  return new THREE.Sprite(mat);
+}
+</script>
 </body>
 </html>
